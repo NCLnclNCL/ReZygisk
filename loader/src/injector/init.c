@@ -31,7 +31,7 @@ EXPORT volatile bool init_is_unhooked;
 static int init_sock;
 static struct sockaddr_un init_sock_addr = {
         .sun_family = AF_UNIX,
-        .sun_path = "/data/adb/rezygisk/init_con.sock\0"
+        .sun_path = "/data/adb/nrezygisk/init_con.sock\0"
 };
 
 DCL_HOOK_FUNC(pid_t, fork) {

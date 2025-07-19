@@ -190,7 +190,7 @@ bool attr_hook_handle(struct init_fork *proc) {
         return true;
     }
 
-    if (((void*) regs.REG_IP) != proc->next_breakpoint) {
+    if (!proc->next_breakpoint || ((void*) regs.REG_IP) != proc->next_breakpoint) {
         return false;
     }
 

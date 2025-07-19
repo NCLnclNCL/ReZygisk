@@ -94,7 +94,7 @@ async function getModuleNames(modules) {
   document.getElementById('kernel_version_div').innerHTML = unameCmd.stdout
   console.log('[rezygisk.js] Kernel version: ', unameCmd.stdout)
 
-  const catCmd = await exec('/system/bin/cat /data/adb/rezygisk/module.prop')
+  const catCmd = await exec('/system/bin/cat /data/adb/nrezygisk/module.prop')
   console.log(`[rezygisk.js] ReZygisk module infomation:\n${catCmd.stdout}`)
 
   let expectedWorking = 0

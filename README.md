@@ -15,7 +15,7 @@ In addition, there are some changes to make the module better align with my pers
 
 ## Options
 
-Currently, all options are on/off, and turning them on is done by creating an empty file in `/data/adb/rezygisk`
+The below options are on/off, and turning them on is done by creating an empty file in `/data/adb/nrezygisk`
 with the appropriate name. The options are:
 
 - `clean_zygote`: Run zygote in a clean mount namespace (as in, free of suspicious mounts).
@@ -52,9 +52,16 @@ us to monitor `fork()` calls of `init` and attach to its child processes.
   - This option is not related to hiding root.
   - This option is disabled by default.
 
-
-Note that upstream ReZygisk deletes the contents of the `/data/adb/rezygisk` directory, causing changes to the above
-options to be lost.
+In addition, it is possible to change denylisted apps and unmounted mountpoints using the file `/data/adb/nrezygisk/rules.txt`:
+- Lines starting with `/` are interpreted as mountpoints to unmount, e.g. `/data/adb/*`
+- Other lines are interpreted as apps
+  - This can be a package name like `com.termux` or `com.google.*`
+  - Or an uid like `10123`
+  - Or an uid range like `0-9999` or `10000-*`
+  - By default, apps here will be added to the denylist, `-` can be used to remove from denylist, e.g. `-com.termux` or `-10123`
+  - Rules are processed in the order they are listed, only the first matching rule has effect
+  - These rules override the denylist status specified by the root implementation, except that apps granted root will never be denylisted
+- Note that `*` works as a wildcard only when it's the last character of a line
 
 ## Limitations
 

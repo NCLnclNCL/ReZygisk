@@ -15,7 +15,7 @@ extern "C" {
 #define CONCAT(x, y) CONCAT_(x,y)
 
 #define LOG_TAG lp_select("zygiskd32", "zygiskd64")
-#define TMP_PATH "/data/adb/rezygisk"
+#define TMP_PATH "/data/adb/nrezygisk"
 
 
 #define LOGI(...)                                              \

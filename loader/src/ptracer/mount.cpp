@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "daemon.h"
 #include "umount.hpp"
+#include "rules.hpp"
 
 static void set_process_name(char **argv, const char *name) {
     prctl(PR_SET_NAME, name);
@@ -75,6 +76,8 @@ extern "C" void mount_ns_private() {
     if (access(TMP_PATH "/private_mounts", F_OK) != 0) {
         return;
     }
+
+    rules_reload();
 
     DIR *proc = opendir("/proc");
     if (!proc) return;

@@ -12,8 +12,9 @@
 
 #include "logging.h"
 #include "umount.hpp"
+#include "rules.hpp"
 
-std::string modules_dev;
+char modules_dev[64] = {0};
 
 static std::string path_dev_str(const char *path) {
     struct stat st = {};
@@ -42,16 +43,16 @@ static std::string fd_dev_str(int fd) {
 }
 
 void umount_init_modules_dev() {
-    if (!modules_dev.empty()) return;
+    if (modules_dev[0]) return;
 
     std::string root_dev = path_dev_str("/");
     std::string data_dev = path_dev_str("/data");
     std::string mod_dev = path_dev_str("/data/adb/modules");
 
     if (mod_dev != root_dev && mod_dev != data_dev && mod_dev != "?") {
-        modules_dev = mod_dev;
+        strcpy(modules_dev, mod_dev.c_str());
     } else {
-        modules_dev = "- no separate device -";
+        strcpy(modules_dev, "- no separate device -");
     }
 }
 
@@ -125,7 +126,8 @@ std::vector<ToUmount> umount_list(umount_filter filter) {
             || mountSource == "APatch"
             || mountSource == "magisk"
             || root.find("/adb/") != std::string::npos
-            || majorMinor == modules_dev) {
+            || majorMinor == modules_dev
+            || rules_should_umount(mountPoint)) {
             struct ToUmount um = {
                     .mountPoint = mountPoint,
                     .mountId = (int) strtol(mountId.c_str(), nullptr, 10),
@@ -147,7 +149,7 @@ bool umount_get_fd(ToUmount &u, int &mnt_fd, std::string &fd_path) {
     }
 
     int mnt_fd_id = mount_id_for_fd(mnt_fd);
-    if (mnt_fd_id != u.mountId) {
+    if (mnt_fd_id != u.mountId && mnt_fd_id != -1) {
         LOGE("umount_get_fd: mount id expected %d vs actual %d for %s", u.mountId, mnt_fd_id, u.mountPoint.c_str());
         close(mnt_fd);
         return false;
@@ -157,7 +159,7 @@ bool umount_get_fd(ToUmount &u, int &mnt_fd, std::string &fd_path) {
     snprintf(mnt_fd_path, sizeof(mnt_fd_path), "/proc/self/fd/%d", mnt_fd);
 
     std::string mnt_fd_dev = fd_dev_str(mnt_fd);
-    if (mnt_fd_dev != u.majorMinor) {
+    if (mnt_fd_dev != u.majorMinor && mnt_fd_dev != "?") {
         LOGE("umount_get_fd: dev expected %s vs actual %s for %s", u.majorMinor.c_str(), mnt_fd_dev.c_str(), u.mountPoint.c_str());
         close(mnt_fd);
         return false;

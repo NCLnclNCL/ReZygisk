@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-extern std::string modules_dev;
+extern char modules_dev[64];
 
 struct ToUmount {
     std::string mountPoint;

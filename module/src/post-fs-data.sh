@@ -26,7 +26,7 @@ create_sys_perm() {
   chcon u:object_r:system_file:s0 $1
 }
 
-export TMP_PATH=/data/adb/rezygisk
+export TMP_PATH=/data/adb/nrezygisk
 
 if [ -d $TMP_PATH ]; then
   rm $TMP_PATH/cp32.sock 2>/dev/null

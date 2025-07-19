@@ -395,7 +395,7 @@ static bool init_map_exe() {
 
 static struct sockaddr_un init_sock_addr = {
         .sun_family = AF_UNIX,
-        .sun_path = "/data/adb/rezygisk/init_con.sock\0"
+        .sun_path = "/data/adb/nrezygisk/init_con.sock\0"
 };
 
 static int chcon(const char *restrict path, const char *context) {

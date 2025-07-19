@@ -1,5 +1,5 @@
 #!/system/bin/sh
 
-export TMP_PATH=/data/adb/rezygisk
+export TMP_PATH=/data/adb/nrezygisk
 
-rm -rf $TMP_PATH
+# rm -rf $TMP_PATH
