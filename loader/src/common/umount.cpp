@@ -14,7 +14,7 @@
 #include "umount.hpp"
 #include "rules.hpp"
 
-char modules_dev[64] = {0};
+static std::string modules_dev;
 
 static std::string path_dev_str(const char *path) {
     struct stat st = {};
@@ -43,16 +43,16 @@ static std::string fd_dev_str(int fd) {
 }
 
 void umount_init_modules_dev() {
-    if (modules_dev[0]) return;
+    if (!modules_dev.empty()) return;
 
     std::string root_dev = path_dev_str("/");
     std::string data_dev = path_dev_str("/data");
     std::string mod_dev = path_dev_str("/data/adb/modules");
 
     if (mod_dev != root_dev && mod_dev != data_dev && mod_dev != "?") {
-        strcpy(modules_dev, mod_dev.c_str());
+        modules_dev = mod_dev;
     } else {
-        strcpy(modules_dev, "- no separate device -");
+        modules_dev = "- no separate device -";
     }
 }
 
@@ -140,17 +140,17 @@ std::vector<ToUmount> umount_list(umount_filter filter) {
     return umounts;
 }
 
-bool umount_get_fd(ToUmount &u, int &mnt_fd, std::string &fd_path) {
+bool ToUmount::get_fd(int &mnt_fd, std::string &fd_path) const {
     /* INFO: These checks are to avoid issues with TOCTTOU and nested mounts */
-    mnt_fd = open(u.mountPoint.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+    mnt_fd = open(mountPoint.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
     if (mnt_fd == -1) {
-        PLOGE("umount_get_fd: mnt_fd = open(%s)", u.mountPoint.c_str());
+        PLOGE("umount_get_fd: mnt_fd = open(%s)", mountPoint.c_str());
         return false;
     }
 
     int mnt_fd_id = mount_id_for_fd(mnt_fd);
-    if (mnt_fd_id != u.mountId && mnt_fd_id != -1) {
-        LOGE("umount_get_fd: mount id expected %d vs actual %d for %s", u.mountId, mnt_fd_id, u.mountPoint.c_str());
+    if (mnt_fd_id != mountId && mnt_fd_id != -1) {
+        LOGE("umount_get_fd: mount id expected %d vs actual %d for %s", mountId, mnt_fd_id, mountPoint.c_str());
         close(mnt_fd);
         return false;
     }
@@ -159,8 +159,8 @@ bool umount_get_fd(ToUmount &u, int &mnt_fd, std::string &fd_path) {
     snprintf(mnt_fd_path, sizeof(mnt_fd_path), "/proc/self/fd/%d", mnt_fd);
 
     std::string mnt_fd_dev = fd_dev_str(mnt_fd);
-    if (mnt_fd_dev != u.majorMinor && mnt_fd_dev != "?") {
-        LOGE("umount_get_fd: dev expected %s vs actual %s for %s", u.majorMinor.c_str(), mnt_fd_dev.c_str(), u.mountPoint.c_str());
+    if (mnt_fd_dev != majorMinor && mnt_fd_dev != "?") {
+        LOGE("umount_get_fd: dev expected %s vs actual %s for %s", majorMinor.c_str(), mnt_fd_dev.c_str(), mountPoint.c_str());
         close(mnt_fd);
         return false;
     }

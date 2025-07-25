@@ -16,7 +16,6 @@ allow zygote zygote process {execmem ptrace}
 allow system_server system_server process execmem
 allow zygote tmpfs file *
 allow zygote appdomain_tmpfs file *
-allow zygote * dir {search getattr}
 
 allow init zygote_exec file *
 allow init zygisk_file sock_file {read write}
@@ -30,10 +29,10 @@ allow init su {lnk_file file} read
 allow init adb_data_file dir search
 allow init adb_data_file file *
 allow init proc file {read open}
+allow init nsfs file {read open}
 allow init init process execmem
 allow init tmpfs file *
 allow init appdomain_tmpfs file *
-allow init * dir {search getattr}
 allow init zygote unix_stream_socket *
 allow init zygote sock_file *
 allow init magisk unix_dgram_socket *

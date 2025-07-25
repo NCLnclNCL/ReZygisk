@@ -37,6 +37,7 @@
 #include "umount.hpp"
 #include "utils.hpp"
 #include "rules.hpp"
+#include "socket_utils.h"
 
 using namespace std;
 
@@ -1144,29 +1145,6 @@ static int is_zygote_con() {
     return contents.find("zygote") != std::string::npos;
 }
 
-static bool is_after_reexec = false;
-
-static void init_modules_dev() {
-    int clean_ns = -1;
-    if (is_after_reexec) {
-        clean_ns = open("/proc/self/ns/mnt", O_RDONLY | O_CLOEXEC);
-        if (clean_ns == -1) {
-            PLOGE("init_modules_dev: open(/proc/self/ns/mnt)");
-            return;
-        }
-        update_mnt_ns(Mounted, false);
-    }
-
-    umount_init_modules_dev();
-
-    if (is_after_reexec) {
-        if (setns(clean_ns, CLONE_NEWNS) == -1) {
-            PLOGE("init_modules_dev: setns(clean_ns)");
-        }
-        close(clean_ns);
-    }
-}
-
 static bool load_early_mns() {
     const char *path = TMP_PATH "/" LP_SELECT("mns32", "mns64");
 
@@ -1191,8 +1169,6 @@ void clean_mounts(char **argv, char **envp) {
         /* INFO: If argv is null, it means that we are past re-exec (see ptracer.c is_first) */
         /* INFO: Re-exec only happens in clean_zygote mode so we should assume it to be active */
         clean_zygote = true;
-        is_after_reexec = true;
-        init_modules_dev();
         return;
     }
 
@@ -1290,7 +1266,6 @@ void clean_mounts(char **argv, char **envp) {
          * detection than what it fixes, so we don't.
          */
         LOGE("clean_mounts: in zygote context, skip reexec");
-        is_after_reexec = true;
     } else {
         if (!set_exec_con("u:r:zygote:s0")) {
             exit(1);
@@ -1309,7 +1284,8 @@ static MappedBuffer mountinfo_prev;
 static void do_umounts() {
     if (!clean_zygote) return;
     if (mns_stage == MNS_PRE_APP || mns_stage == MNS_APP) return;
-    if (gettid() != getpid()) return;
+    pid_t my_pid = getpid();
+    if (gettid() != my_pid) return;
 
     if (!rules_reload()) {
         if (mountinfo_buf.file_read("/proc/self/mounts", mountinfo_prev.size)) {
@@ -1318,23 +1294,28 @@ static void do_umounts() {
         }
     }
 
-    std::vector<ToUmount> umounts = umount_list(UmountsGetAll);
-
-    for (auto it = umounts.rbegin(); it != umounts.rend(); ++it) {
-        int mnt_fd;
-        std::string mnt_fd_path;
-
-        if (!umount_get_fd(*it, mnt_fd, mnt_fd_path)) continue;
-
-        /* INFO: Remount it as private to prevent unwanted propagation of the umount (see man umount(2)) */
-        mount(nullptr, mnt_fd_path.c_str(), nullptr, MS_REC | MS_PRIVATE, nullptr);
-
-        if (umount2(mnt_fd_path.c_str(), MNT_DETACH) == -1) {
-            PLOGE("do_umounts: umount2(%s, MNT_DETACH)", it->mountPoint.c_str());
-        }
-
-        close(mnt_fd);
+    int client = socket(PF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (client == -1) {
+        PLOGE("do_umounts: socket");
+        return;
     }
+
+    if (TEMP_FAILURE_RETRY(connect(client, (const sockaddr *) &umountd_sock_addr,
+                                   sizeof(umountd_sock_addr))) == -1) {
+        PLOGE("do_umounts: connect");
+        close(client);
+        return;
+    }
+
+    if (write_n(client, &my_pid, sizeof(my_pid)) <= 0) {
+        PLOGE("do_umounts: write_n");
+        close(client);
+        return;
+    }
+
+    char dummy;
+    TEMP_FAILURE_RETRY(read(client, &dummy, 1));
+    close(client);
 }
 
 
@@ -1427,7 +1408,6 @@ static void unhook_functions() {
     cached_map_infos = nullptr;
     delete modules;
     modules = nullptr;
-    memset(modules_dev, 0, sizeof(modules_dev));
     mountinfo_buf.unmap();
     mountinfo_prev.unmap();
     rules_unload();

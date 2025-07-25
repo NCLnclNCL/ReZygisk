@@ -365,12 +365,16 @@ bool inject_on_main(int pid, const char *lib_path, bool is_first) {
     map = parse_maps(pid_maps);
 
     void *start_addr = NULL;
+    uintptr_t end_addr = 0;
     size_t block_size = 0;
 
     for (size_t i = 0; i < map->size; i++) {
-      if (!strstr(map->maps[i].path, "libzygisk.so")) continue;
+      bool is_zygisk = strstr(map->maps[i].path, "libzygisk.so") != NULL;
+      if (!is_zygisk) is_zygisk = map->maps[i].start == end_addr && strcmp(map->maps[i].path, "[anon:.bss]") == 0;
+      if (!is_zygisk) continue;
 
       if (start_addr == NULL) start_addr = (void *)map->maps[i].start;
+      end_addr = map->maps[i].end;
 
       size_t size = map->maps[i].end - map->maps[i].start;
       block_size += size;

@@ -183,48 +183,37 @@ bool rezygiskd_listener_init() {
 struct __attribute__((__packed__)) MsgHead {
   unsigned int cmd;
   int length;
+  char data[];
 };
 
 void rezygiskd_listener_callback() {
+  const size_t max_data = 2048;
+  const size_t buf_size = sizeof(struct MsgHead) + max_data + 1;
+  struct MsgHead *msg = malloc(buf_size);
+  if (!msg) return;
+
   while (1) {
-    struct MsgHead msg = { 0 };
+    ssize_t nread = read(monitor_sock_fd, msg, buf_size);
+    if (nread == -1) {
+      free(msg);
 
-    size_t nread;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return;
 
-    again:
-      nread = read(monitor_sock_fd, &msg, sizeof(msg));
-      if ((int)nread == -1) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) goto again;
+      PLOGE("read socket");
 
-        PLOGE("read socket");
-
-        continue;
-      }
-
-    char *msg_data = NULL;
-
-    if (msg.length != 0) {
-      msg_data = malloc(msg.length);
-      if (!msg_data) {
-        LOGE("malloc msg data failed");
-
-        continue;
-      }
-
-      again_msg_data:
-        nread = read(monitor_sock_fd, msg_data, msg.length);
-        if ((int)nread == -1) {
-          if (errno == EAGAIN || errno == EWOULDBLOCK) goto again_msg_data;
-
-          PLOGE("read socket");
-
-          free(msg_data);
-
-          continue;
-        }
+      return;
     }
 
-    switch (msg.cmd) {
+    char *msg_data = msg->data;
+    size_t msg_len = (size_t)msg->length;
+    if (msg_len > max_data) {
+      LOGE("rezygiskd_listener_callback: message too long (%d), truncating", msg->length);
+      msg_len = max_data;
+      msg->length = (int)max_data;
+    }
+    msg_data[msg_len] = '\0';
+
+    switch (msg->cmd) {
       case START: {
         if (tracing_state == STOPPING) tracing_state = TRACING;
         else if (tracing_state == STOPPED) {
@@ -286,7 +275,7 @@ void rezygiskd_listener_callback() {
           status64.daemon_info = NULL;
         }
 
-        status64.daemon_info = (char *)malloc(msg.length);
+        status64.daemon_info = (char *)malloc(msg->length + 1);
         if (!status64.daemon_info) {
           PLOGE("malloc daemon64 info");
 
@@ -307,7 +296,7 @@ void rezygiskd_listener_callback() {
           status32.daemon_info = NULL;
         }
 
-        status32.daemon_info = (char *)malloc(msg.length);
+        status32.daemon_info = (char *)malloc(msg->length + 1);
         if (!status32.daemon_info) {
           PLOGE("malloc daemon32 info");
 
@@ -330,7 +319,7 @@ void rezygiskd_listener_callback() {
           status64.daemon_error_info = NULL;
         }
 
-        status64.daemon_error_info = (char *)malloc(msg.length);
+        status64.daemon_error_info = (char *)malloc(msg->length + 1);
         if (!status64.daemon_error_info) {
           PLOGE("malloc daemon64 error info");
 
@@ -353,7 +342,7 @@ void rezygiskd_listener_callback() {
           status32.daemon_error_info = NULL;
         }
 
-        status32.daemon_error_info = (char *)malloc(msg.length);
+        status32.daemon_error_info = (char *)malloc(msg->length + 1);
         if (!status32.daemon_error_info) {
           PLOGE("malloc daemon32 error info");
 
@@ -376,10 +365,6 @@ void rezygiskd_listener_callback() {
         break;
       }
     }
-
-    if (msg_data) free(msg_data);
-
-    break;
   }
 }
 

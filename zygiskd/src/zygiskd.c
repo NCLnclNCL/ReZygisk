@@ -48,8 +48,11 @@ enum Architecture {
 #define ZYGISKD_PATH "/data/adb/modules/rezygisk/bin/zygiskd" lp_select("32", "64")
 
 static enum Architecture get_arch(void) {
-  char system_arch[264];
-  get_property("ro.product.cpu.abilist", system_arch);
+  char system_arch[264] = { 0 };
+  get_property("ro.system.product.cpu.abilist", system_arch);
+
+  if (system_arch[0] == '\0')
+    get_property("ro.product.cpu.abilist", system_arch);
 
   /* INFO: "PC" architectures should have priority because in an emulator
              the native architecture should have priority over the emulated
@@ -267,6 +270,7 @@ static int spawn_companion(char *restrict argv[], char *restrict name, int lib_f
 struct __attribute__((__packed__)) MsgHead {
   unsigned int cmd;
   int length;
+  char data[];
 };
 
 /* WARNING: Dynamic memory based */
@@ -284,15 +288,16 @@ void zygiskd_start(char *restrict argv[]) {
     if (impl.impl == None) msg_data = "Unsupported environment: Unknown root implementation";
     else msg_data = "Unsupported environment: Multiple root implementations found";
 
-    struct MsgHead msg = {
-      .cmd = DAEMON_SET_ERROR_INFO,
-      .length = (int)strlen(msg_data) + 1
-    };
+    size_t msg_len = strlen(msg_data) + 1;
 
-    unix_datagram_sendto(CONTROLLER_SOCKET, &msg, sizeof(struct MsgHead));
-    unix_datagram_sendto(CONTROLLER_SOCKET, msg_data, (size_t)msg.length);
+    struct MsgHead *msg = malloc(sizeof(struct MsgHead) + msg_len);
+    msg->cmd = DAEMON_SET_ERROR_INFO;
+    msg->length = (int)msg_len;
+    strcpy(msg->data, msg_data);
 
-    free(msg_data);
+    unix_datagram_sendto(CONTROLLER_SOCKET, msg, sizeof(struct MsgHead) + msg_len);
+
+    free(msg);
   } else {
     enum Architecture arch = get_arch();
     load_modules(arch, &context);
@@ -339,24 +344,21 @@ void zygiskd_start(char *restrict argv[]) {
 
     size_t msg_length = strlen("Root: , Modules: ") + strlen(impl_name) + module_list_len + 1;
 
-    struct MsgHead msg = {
-      .cmd = DAEMON_SET_INFO,
-      .length = (int)msg_length
-    };
-
-    char *msg_data = malloc(msg_length);
-    if (msg_data == NULL) {
+    struct MsgHead *msg = malloc(sizeof(struct MsgHead) + msg_length);
+    if (msg == NULL) {
       LOGE("Failed allocating memory for message data.\n");
 
       return;
     }
 
-    snprintf(msg_data, msg_length, "Root: %s, Modules: %s", impl_name, module_list);
+    msg->cmd = DAEMON_SET_INFO;
+    msg->length = (int)msg_length;
 
-    unix_datagram_sendto(CONTROLLER_SOCKET, &msg, sizeof(struct MsgHead));
-    unix_datagram_sendto(CONTROLLER_SOCKET, msg_data, msg_length);
+    snprintf(msg->data, msg_length, "Root: %s, Modules: %s", impl_name, module_list);
 
-    free(msg_data);
+    unix_datagram_sendto(CONTROLLER_SOCKET, msg, sizeof(struct MsgHead) + msg_length);
+
+    free(msg);
     free(module_list);
   }
 
@@ -374,8 +376,8 @@ void zygiskd_start(char *restrict argv[]) {
   while (1) {
     int client_fd = accept(socket_fd, NULL, NULL);
     if (client_fd == -1) {
+      if (errno == EINTR) continue;
       LOGE("accept: %s\n", strerror(errno));
-
       return;
     }
 

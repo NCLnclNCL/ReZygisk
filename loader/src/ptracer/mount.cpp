@@ -10,14 +10,18 @@
 #include <sys/types.h>
 #include <cerrno>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <sys/socket.h>
+#include <sys/xattr.h>
 
 #include "utils.h"
 #include "daemon.h"
 #include "umount.hpp"
 #include "rules.hpp"
+#include "socket_utils.h"
 
 static void set_process_name(char **argv, const char *name) {
     prctl(PR_SET_NAME, name);
@@ -69,6 +73,7 @@ static pid_t mount_spawn_ns(char **argv, const char *pname, const char *save) {
     close(ready_pipe[1]);
     char dummy;
     TEMP_FAILURE_RETRY(read(ready_pipe[0], &dummy, 1));
+    close(ready_pipe[0]);
     return pid;
 }
 
@@ -116,7 +121,7 @@ extern "C" void mount_ns_private() {
         return;
     }
 
-    for (int their_ns : namespace_fds) {
+    for (int their_ns: namespace_fds) {
         if (setns(their_ns, CLONE_NEWNS) != 0) {
             close(their_ns);
             continue;
@@ -128,7 +133,7 @@ extern "C" void mount_ns_private() {
             int mnt_fd;
             std::string mnt_fd_path;
 
-            if (!umount_get_fd(*it, mnt_fd, mnt_fd_path)) continue;
+            if (!it->get_fd(mnt_fd, mnt_fd_path)) continue;
 
             if (mount(nullptr, mnt_fd_path.c_str(), nullptr, MS_PRIVATE | MS_REC, nullptr) == -1) {
                 PLOGE("mount_ns_private: mount(%s, MS_PRIVATE | MS_REC)", it->mountPoint.c_str());
@@ -144,10 +149,103 @@ extern "C" void mount_ns_private() {
     close(orig_ns);
 }
 
+static void do_umounts() {
+    rules_reload();
+
+    std::vector<ToUmount> umounts = umount_list(UmountsGetAll);
+
+    for (auto it = umounts.rbegin(); it != umounts.rend(); ++it) {
+        int mnt_fd;
+        std::string mnt_fd_path;
+
+        if (!it->get_fd(mnt_fd, mnt_fd_path)) continue;
+
+        /* INFO: Remount it as private to prevent unwanted propagation of the umount (see man umount(2)) */
+        mount(nullptr, mnt_fd_path.c_str(), nullptr, MS_REC | MS_PRIVATE, nullptr);
+
+        if (umount2(mnt_fd_path.c_str(), MNT_DETACH) == -1) {
+            PLOGE("do_umounts: umount2(%s, MNT_DETACH)", it->mountPoint.c_str());
+        }
+
+        close(mnt_fd);
+    }
+}
+
+static void run_umountd(char **argv, int ready_pipe) {
+    set_process_name(argv, "zygisk-umd");
+
+    {
+        std::ofstream attr("/proc/self/attr/sockcreate");
+        attr << "u:r:zygote:s0";
+    }
+
+    unlink(umountd_sock_addr.sun_path);
+
+    int server = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server == -1) {
+        PLOGE("run_umountd: socket");
+        return;
+    }
+
+    if (bind(server, (const sockaddr *) &umountd_sock_addr, sizeof(umountd_sock_addr)) == -1) {
+        PLOGE("run_umountd: bind");
+        return;
+    }
+
+    if (listen(server, 5) == -1) {
+        PLOGE("run_umountd: listen");
+        return;
+    }
+
+    {
+        const char *ctx = "u:object_r:zygisk_file:s0";
+        setxattr(umountd_sock_addr.sun_path, "security.selinux", ctx, strlen(ctx) + 1, 0);
+    }
+
+    close(ready_pipe);
+
+    while (true) {
+        int client = TEMP_FAILURE_RETRY(accept(server, nullptr, nullptr));
+        if (client == -1) {
+            PLOGE("run_umountd: accept");
+            return;
+        }
+
+        pid_t pid = 0;
+        read_n(client, &pid, sizeof(pid));
+
+        int orig_ns = -1;
+        if (switch_mnt_ns(pid, &orig_ns)) {
+            do_umounts();
+            switch_mnt_ns(0, &orig_ns);
+        }
+
+        close(client);
+    }
+}
+
+static void spawn_umountd(char **argv) {
+    int ready_pipe[2] = {-1, -1};
+    pipe(ready_pipe);
+
+    if (fork() == 0) {
+        close(ready_pipe[0]);
+        run_umountd(argv, ready_pipe[1]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    char dummy;
+    TEMP_FAILURE_RETRY(read(ready_pipe[0], &dummy, 1));
+    close(ready_pipe[0]);
+}
+
 extern "C" void mount_ns_main(char **argv) {
     if (access(TMP_PATH "/clean_zygote", F_OK) != 0) {
         return;
     }
+
+    spawn_umountd(argv);
 
     pid_t m64 = -1;
     if (LP_SELECT(false, true)) {
