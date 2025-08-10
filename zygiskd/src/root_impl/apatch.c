@@ -72,6 +72,14 @@ struct packages_config {
   size_t size;
 };
 
+void _apatch_free_package_config(struct packages_config *restrict config) {
+  for (size_t i = 0; i < config->size; i++) {
+    free(config->configs[i].process);
+  }
+
+  free(config->configs);
+}
+
 /* WARNING: Dynamic memory based */
 bool _apatch_get_package_config(struct packages_config *restrict config) {
   config->configs = NULL;
@@ -94,15 +102,17 @@ bool _apatch_get_package_config(struct packages_config *restrict config) {
     return false;
   }
 
-  while (fgets(line, sizeof(line), fp) != NULL) {
-    config->configs = realloc(config->configs, (config->size + 1) * sizeof(struct package_config));
-    if (config->configs == NULL) {
+  while (fgets(line, sizeof(line), fp) != NULL) { 
+    struct package_config *tmp_configs = realloc(config->configs, (config->size + 1) * sizeof(struct package_config));
+    if (tmp_configs == NULL) {
       LOGE("Failed to realloc APatch config struct: %s\n", strerror(errno));
 
+      _apatch_free_package_config(config);
       fclose(fp);
 
       return false;
     }
+    config->configs = tmp_configs;
 
     strtok(line, ",");
 
@@ -127,17 +137,9 @@ bool _apatch_get_package_config(struct packages_config *restrict config) {
   return true;
 }
 
-void _apatch_free_package_config(struct packages_config *restrict config) {
-  free(config->configs);
-}
-
 bool apatch_uid_granted_root(uid_t uid) {
   struct packages_config config;
-  if (!_apatch_get_package_config(&config)) {
-    _apatch_free_package_config(&config);
-
-    return false;
-  }
+  if (!_apatch_get_package_config(&config)) return false;
 
   for (size_t i = 0; i < config.size; i++) {
     if (config.configs[i].uid != uid) continue;
@@ -157,11 +159,7 @@ bool apatch_uid_granted_root(uid_t uid) {
 
 bool apatch_uid_should_umount(uid_t uid) {
   struct packages_config config;
-  if (!_apatch_get_package_config(&config)) {
-    _apatch_free_package_config(&config);
-
-    return false;
-  }
+  if (!_apatch_get_package_config(&config)) return false;
 
   for (size_t i = 0; i < config.size; i++) {
     if (config.configs[i].uid != uid) continue;
